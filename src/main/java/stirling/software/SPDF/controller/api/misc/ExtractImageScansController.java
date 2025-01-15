@@ -5,11 +5,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -19,8 +17,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.rendering.PDFRenderer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,17 +29,20 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import lombok.extern.slf4j.Slf4j;
 import stirling.software.SPDF.model.api.misc.ExtractImageScansRequest;
+import stirling.software.SPDF.utils.CheckProgramInstall;
 import stirling.software.SPDF.utils.ProcessExecutor;
 import stirling.software.SPDF.utils.ProcessExecutor.ProcessExecutorResult;
 import stirling.software.SPDF.utils.WebResponseUtils;
 
 @RestController
 @RequestMapping("/api/v1/misc")
+@Slf4j
 @Tag(name = "Misc", description = "Miscellaneous APIs")
 public class ExtractImageScansController {
 
-    private static final Logger logger = LoggerFactory.getLogger(ExtractImageScansController.class);
+    private static final String REPLACEFIRST = "[.][^.]+$";
 
     @PostMapping(consumes = "multipart/form-data", value = "/extract-image-scans")
     @Operation(
@@ -78,6 +77,11 @@ public class ExtractImageScansController {
         Path tempZipFile = null;
         List<Path> tempDirs = new ArrayList<>();
 
+        if (!CheckProgramInstall.isPythonAvailable()) {
+            throw new IOException("Python is not installed.");
+        }
+
+        String pythonVersion = CheckProgramInstall.getAvailablePythonCommand();
         try {
             // Check if input file is a PDF
             if ("pdf".equalsIgnoreCase(extension)) {
@@ -104,10 +108,7 @@ public class ExtractImageScansController {
                 }
             } else {
                 tempInputFile = Files.createTempFile("input_", "." + extension);
-                Files.copy(
-                        form.getFileInput().getInputStream(),
-                        tempInputFile,
-                        StandardCopyOption.REPLACE_EXISTING);
+                form.getFileInput().transferTo(tempInputFile);
                 // Add input file path to images list
                 images.add(tempInputFile.toString());
             }
@@ -122,7 +123,7 @@ public class ExtractImageScansController {
                 List<String> command =
                         new ArrayList<>(
                                 Arrays.asList(
-                                        "python3",
+                                        pythonVersion,
                                         "./scripts/split_photos.py",
                                         images.get(i),
                                         tempDir.toString(),
@@ -143,8 +144,7 @@ public class ExtractImageScansController {
                                 .runCommandWithOutputHandling(command);
 
                 // Read the output photos in temp directory
-                List<Path> tempOutputFiles =
-                        Files.list(tempDir).sorted().collect(Collectors.toList());
+                List<Path> tempOutputFiles = Files.list(tempDir).sorted().toList();
                 for (Path tempOutputFile : tempOutputFiles) {
                     byte[] imageBytes = Files.readAllBytes(tempOutputFile);
                     processedImageBytes.add(imageBytes);
@@ -156,7 +156,7 @@ public class ExtractImageScansController {
             // Create zip file if multiple images
             if (processedImageBytes.size() > 1) {
                 String outputZipFilename =
-                        fileName.replaceFirst("[.][^.]+$", "") + "_processed.zip";
+                        fileName.replaceFirst(REPLACEFIRST, "") + "_processed.zip";
                 tempZipFile = Files.createTempFile("output_", ".zip");
 
                 try (ZipOutputStream zipOut =
@@ -165,7 +165,7 @@ public class ExtractImageScansController {
                     for (int i = 0; i < processedImageBytes.size(); i++) {
                         ZipEntry entry =
                                 new ZipEntry(
-                                        fileName.replaceFirst("[.][^.]+$", "")
+                                        fileName.replaceFirst(REPLACEFIRST, "")
                                                 + "_"
                                                 + (i + 1)
                                                 + ".png");
@@ -178,16 +178,20 @@ public class ExtractImageScansController {
                 byte[] zipBytes = Files.readAllBytes(tempZipFile);
 
                 // Clean up the temporary zip file
-                Files.delete(tempZipFile);
+                Files.deleteIfExists(tempZipFile);
 
                 return WebResponseUtils.bytesToWebResponse(
                         zipBytes, outputZipFilename, MediaType.APPLICATION_OCTET_STREAM);
+            }
+            if (processedImageBytes.size() == 0) {
+                throw new IllegalArgumentException("No images detected");
             } else {
+
                 // Return the processed image as a response
                 byte[] imageBytes = processedImageBytes.get(0);
                 return WebResponseUtils.bytesToWebResponse(
                         imageBytes,
-                        fileName.replaceFirst("[.][^.]+$", "") + ".png",
+                        fileName.replaceFirst(REPLACEFIRST, "") + ".png",
                         MediaType.IMAGE_PNG);
             }
         } finally {
@@ -197,15 +201,15 @@ public class ExtractImageScansController {
                         try {
                             Files.deleteIfExists(path);
                         } catch (IOException e) {
-                            logger.error("Failed to delete temporary image file: " + path, e);
+                            log.error("Failed to delete temporary image file: " + path, e);
                         }
                     });
 
             if (tempZipFile != null && Files.exists(tempZipFile)) {
                 try {
-                    Files.delete(tempZipFile);
+                    Files.deleteIfExists(tempZipFile);
                 } catch (IOException e) {
-                    logger.error("Failed to delete temporary zip file: " + tempZipFile, e);
+                    log.error("Failed to delete temporary zip file: " + tempZipFile, e);
                 }
             }
 
@@ -214,7 +218,7 @@ public class ExtractImageScansController {
                         try {
                             FileUtils.deleteDirectory(dir.toFile());
                         } catch (IOException e) {
-                            logger.error("Failed to delete temporary directory: " + dir, e);
+                            log.error("Failed to delete temporary directory: " + dir, e);
                         }
                     });
         }

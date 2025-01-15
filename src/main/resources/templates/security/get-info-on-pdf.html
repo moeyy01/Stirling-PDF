@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html th:lang="${#locale.language}" th:lang-direction="#{language.direction}" th:language="${#locale.toString()}" xmlns:th="http://www.thymeleaf.org">
+<html th:lang="${#locale.language}" th:dir="#{language.direction}" th:data-language="${#locale.toString()}" xmlns:th="https://www.thymeleaf.org">
   <head>
   <th:block th:insert="~{fragments/common :: head(title=#{getPdfInfo.title}, header=#{getPdfInfo.header})}"></th:block>
   </head>
@@ -8,17 +8,20 @@
     <div id="page-container">
       <div id="content-wrap">
         <th:block th:insert="~{fragments/navbar.html :: navbar}"></th:block>
-        <br /><br />
+        <br><br>
         <div class="container">
           <div class="row justify-content-center">
-            <div class="col-md-6">
-              <h2 th:text="#{getPdfInfo.header}"></h2>
-              <form id="pdfInfoForm" method="post" enctype="multipart/form-data" th:action="@{api/v1/security/get-info-on-pdf}">
-                <div th:replace="~{fragments/common :: fileSelector(name='fileInput', multiple=false, remoteCall='false', accept='application/pdf')}"></div>
-                <br>
+            <div class="col-md-6 bg-card">
+              <div class="tool-header">
+                <span class="material-symbols-rounded tool-header-icon other">info</span>
+                <span class="tool-header-text" th:text="#{getPdfInfo.header}"></span>
+              </div>
+              <form id="pdfInfoForm" method="post" enctype="multipart/form-data" th:action="@{'/api/v1/security/get-info-on-pdf'}">
+                <div th:replace="~{fragments/common :: fileSelector(name='fileInput', multipleInputsForSingleRequest=false, remoteCall='false', accept='application/pdf')}"></div>
+
                 <button type="submit" id="submitBtn" class="btn btn-primary" th:text="#{getPdfInfo.submit}"></button>
               </form>
-              <div class="container mt-5">
+              <div class="container mt-0">
                 <!-- Iterate over each main section in the JSON -->
                 <div id="json-content">
                   <!-- JavaScript will populate this section -->
@@ -27,13 +30,15 @@
                 <!-- Button to download the JSON -->
                 <a href="#" id="downloadJson" class="btn btn-primary mt-3" style="display: none;" th:text="#{getPdfInfo.downloadJson}">Download JSON</a>
               </div>
+              <script th:src="@{'/js/fetch-utils.js'}"></script>
               <script>
+
                 document.getElementById("pdfInfoForm").addEventListener("submit", function(event) {
                   event.preventDefault();
 
                   const formData = new FormData(event.target);
 
-                  fetch('api/v1/security/get-info-on-pdf', {
+                  fetchWithCsrf('api/v1/security/get-info-on-pdf', {
                     method: 'POST',
                     body: formData
                   }).then(response => response.json()).then(data => {
